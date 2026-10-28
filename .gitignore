@@ -1,0 +1,9 @@
+/originals/*
+!/originals/README.md
+build/
+out/
+__pycache__/
+*.pyc
+*.o
+*.lst
+.DS_Store
