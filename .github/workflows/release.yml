@@ -1,9 +1,12 @@
-# Publishes a GitHub release when a version tag (v*) is pushed.
-# The notes come from .github/release-notes/<tag>.md.
+# Publishes a GitHub release for every .github/release-notes/<tag>.md on main
+# that doesn't have one yet (the tag is created at the pushed commit).
+# To release: add .github/release-notes/vX.Y.md and push it to main.
 name: Release
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: ['.github/release-notes/**']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -11,10 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create release
+      - name: Create missing releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "MouseWrite ${GITHUB_REF_NAME#v}" \
-            --notes-file ".github/release-notes/$GITHUB_REF_NAME.md"
+          for notes in .github/release-notes/v*.md; do
+            tag=$(basename "$notes" .md)
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "$tag already released"
+            else
+              gh release create "$tag" --target "$GITHUB_SHA" \
+                --title "MouseWrite ${tag#v}" --notes-file "$notes"
+            fi
+          done
