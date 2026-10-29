@@ -30,7 +30,9 @@ SHA = {
     'STARTUP': 'c46cd30291fa1a1651dccf8a06a94cd65744024f',
     'CF.GLOSS': '33a169534df448bb72fc6ddc1c7c2e79ed8b2dfd',
     'MW.SYSTEM.1.5.7': '104075c04428cdeec01a635d039e8a75e94a4ba4',
+    'MW.O6': 'b35357cae4418403e1bac776623ba94929412def',
 }
+O6_HEADER = 0xA9        # the overlay stub table at the start of every overlay
 ART_NAMES = {'ART3': 'ART3.0', 'ARTPAK3.1': 'ART3.1', 'ARTPAK3.2': 'ART3.2', 'ART4': 'ART4'}
 sha1 = lambda b: hashlib.sha1(b).hexdigest()
 
@@ -102,22 +104,33 @@ def replace_once(buf, old, new):
     buf[i:i + len(old)] = new
 
 
-def assemble():
-    """returns the MW.SYSTEM add-on; re-assembles it if cc65 is installed"""
-    pre = os.path.join(HERE, 'prebuilt', 'mwfix3.bin')
+def assemble(o6_header):
+    """the MW.SYSTEM add-on, the MW.O6 detour and the exporter MW.OD (without
+    MouseWrite's own stub table, which comes from your MW.O6).  Re-assembled
+    with cc65 when it is installed, otherwise taken from prebuilt/."""
+    names = ['mwfix3.bin', 'o6patch.bin', 'mwod.bin']
+    pre = [open(os.path.join(HERE, 'prebuilt', n), 'rb').read() for n in names]
     ca65, ld65 = shutil.which('ca65'), shutil.which('ld65')
     if not (ca65 and ld65):
-        print('  cc65 not found: using prebuilt/mwfix3.bin')
-        return open(pre, 'rb').read()
+        print('  cc65 not found: using prebuilt/')
+        return pre
     b = os.path.join(HERE, 'build'); os.makedirs(b, exist_ok=True)
     src = os.path.join(HERE, 'src')
-    run = lambda *a: subprocess.run(a, check=True, cwd=b)
+    open(os.path.join(b, 'MW.O6'), 'wb').write(o6_header)
+    run = lambda *a: subprocess.run(a, check=True, cwd=b, stdout=subprocess.DEVNULL)
+    run(sys.executable, os.path.join(HERE, 'tools', 'make_odt_inc.py'), os.path.join(b, 'mwod.inc'))
     run(ca65, os.path.join(src, 'mwbody.s'), '-o', 'mwbody.o')
     run(ld65, '-C', os.path.join(src, 'mwbody.cfg'), 'mwbody.o', '-o', 'mwbody.bin')
-    run(ca65, os.path.join(src, 'mwfix3.s'), '-I', b, '--bin-include-dir', b, '-o', 'mwfix3.o')
+    run(ca65, os.path.join(src, 'mwfix3.s'), '--bin-include-dir', b, '-o', 'mwfix3.o')
     run(ld65, '-C', os.path.join(src, 'mwfix3.cfg'), 'mwfix3.o', '-o', 'mwfix3.bin')
-    out = open(os.path.join(b, 'mwfix3.bin'), 'rb').read()
-    same = out == open(pre, 'rb').read()
+    run(ca65, os.path.join(src, 'o6patch.s'), '-o', 'o6patch.o')
+    run(ld65, '-C', os.path.join(src, 'o6patch.cfg'), 'o6patch.o', '-o', 'o6patch.bin')
+    run(ca65, os.path.join(src, 'mwod.s'), '-I', b, '--bin-include-dir', b, '-o', 'mwod.o')
+    run(ld65, '-C', os.path.join(src, 'mwod.cfg'), 'mwod.o', '-o', 'MW.OD')
+    od = open(os.path.join(b, 'MW.OD'), 'rb').read()
+    open(os.path.join(b, 'mwod.bin'), 'wb').write(od[O6_HEADER:])
+    out = [open(os.path.join(b, n), 'rb').read() for n in names]
+    same = out == pre
     print('  assembled src/ with cc65 (%s prebuilt/)' % ('identical to' if same else 'DIFFERS from'))
     return out
 
@@ -137,6 +150,11 @@ def make_mw_system(orig, addon):
     j = m.find(hi('|' + ' ' * (w - 2) + '|'), i)          # the blank line after it
     m[j:j + w] = hi(boxline('Updated by 6502 Retro 2026', w))
     replace_once(m, hi('Expanded Desktop Version 2.6.8b'), hi(' Expanded Desktop Version 3.0  '))
+    # no text title box any more (the picture is the title screen): JSR $ADFA -> JSR HOME
+    at = 0xA13A - 0x9CF9
+    if m[at:at + 3] != b'\x20\xfa\xad':
+        die('MW.SYSTEM title call not found')
+    m[at:at + 3] = b'\x20\x58\xfc'
     m += addon
     m[1:3] = b'\x1a\x3e'                                   # JMP $3E1A: the add-on runs first
     return bytes(m)
@@ -147,7 +165,34 @@ def make_mw_ui(orig, speller_path):
     u = bytearray(orig)
     replace_once(u, b'Version 2.6.8b by Steve Cochard', b'Version 3.0 by Steve Cochard   ')
     setpath(u, 0x3A, 0x3B, speller_path, 0x20)
+    B = 0x0803
+    # Edit menu "Select Entire Document" -> "Select All"; its spare bytes hold the new label
+    sel = 0x5A11 - B
+    if u[sel:sel + 23] != b'\x16Select Entire Document':
+        die('MW.UI Edit menu string not found')
+    u[sel:sel + 22] = b'\x0aSelect All' + b'\x0aExport ODT'
+    label = 0x5A1C
+    # File menu item 9 (a separator) -> "Export ODT", no key, always enabled
+    item = 0x5859 + 4 + 8 * 6 - B
+    if u[item:item + 6] != b'\x40\x00\x13\x00\x00\x00':
+        die('MW.UI File menu layout not as expected')
+    u[item:item + 6] = bytes([0, 0, 0, 0, label & 255, label >> 8])
+    # File menu jump table entry for item 9 -> the Merge overlay stub ($6949),
+    # whose overlay (MW.O6) sends item 9 on to MW.OD
+    jt = 0x0FC4 + 8 * 2 - B
+    if u[jt:jt + 2] != b'\x00\x00':
+        die('MW.UI File menu dispatch not as expected')
+    u[jt:jt + 2] = b'\x49\x69'
     return bytes(u)
+
+
+def make_mw_o6(orig, patch):
+    check('MW.O6', orig)
+    o = bytearray(orig)
+    if len(o) != 0x6F40 - 0x6949 or o[0x6CB6 - 0x6949:0x6CB9 - 0x6949] != b'\x2c\xaa\x03':
+        die('MW.O6 not as expected')
+    o[0x6CB6 - 0x6949:0x6CB9 - 0x6949] = b'\x4c\x40\x6f'      # JMP detour
+    return bytes(o + patch)
 
 
 def make_mw_gp(orig, base):
@@ -189,7 +234,7 @@ def make_startup(orig):
     return applesoft.link(out)
 
 
-def build_folder(found, base, addon):
+def build_folder(found, base, pieces):
     """the MOUSEWRITE folder, as an ordered file list relative to the folder"""
     t = found['main']
     files = []
@@ -199,13 +244,19 @@ def build_folder(found, base, addon):
             continue
         f = list(f)
         if p == 'MW.SYSTEM':
-            f[1] = make_mw_system(data, addon)
+            f[1] = make_mw_system(data, pieces[0])
             files.append(f)
             splash = open(os.path.join(HERE, 'prebuilt', 'MW.SPLASH'), 'rb').read()
             files.append(['MW.SPLASH', splash, 0x06, 0x2000, 0xE3, f[5], f[6]])
             continue
         if p == 'MW.UI':
             f[1] = make_mw_ui(data, base + 'SPELLER/')
+        elif p == 'MW.O6':
+            f[1] = make_mw_o6(data, pieces[1])
+            files.append(f)
+            od = data[:O6_HEADER] + pieces[2]
+            files.append(['MW.OD', od, 0x06, 0x6949, 0xE3, f[5], f[6]])
+            continue
         elif p == 'MW.GP':
             f[1] = make_mw_gp(data, base)
         elif p == 'SAMPLES/CF.GLOSS':
@@ -251,9 +302,9 @@ def save(path, vol, hdr):
     open(path, 'wb').write(d)
 
 
-def put_everything(vol, folder, found, addon):
+def put_everything(vol, folder, found, pieces):
     base = '/%s/%s/' % (vol.volname, folder.strip('/'))
-    files = build_folder(found, base, addon)
+    files = build_folder(found, base, pieces)
     install(vol, folder, files)
     if found['v157']:
         install(vol, 'MW.V1.5.7', [f for f in found['v157'].files if f[0] != 'PRODOS'])
@@ -274,17 +325,21 @@ def main():
     print('Disks:')
     found = classify(disks)
     print('Building:')
-    addon = assemble()
+    o6 = found['main'].get('MW.O6')
+    if not o6:
+        die('MW.O6 missing from the 2.6.8b disk')
+    check('MW.O6', o6[1])
+    pieces = assemble(o6[1][:O6_HEADER])
 
     out = os.path.join(HERE, 'out'); os.makedirs(out, exist_ok=True)
     vol = ProDOS(format_prodos(4096, 'MWINSTALL'))
-    files = put_everything(vol, 'MOUSEWRITE', found, addon)
+    files = put_everything(vol, 'MOUSEWRITE', found, pieces)
     save(os.path.join(out, 'MouseWrite_3.0_Folder.hdv'), vol, None)
     print('  out/MouseWrite_3.0_Folder.hdv   /MWINSTALL/MOUSEWRITE (+ MW.V1.5.7)' if found['v157']
           else '  out/MouseWrite_3.0_Folder.hdv   /MWINSTALL/MOUSEWRITE')
 
     fd = os.path.join(out, 'files'); shutil.rmtree(fd, ignore_errors=True)
-    changed = {'MW.SYSTEM', 'MW.SPLASH', 'MW.UI', 'MW.GP', 'SAMPLES/CF.GLOSS',
+    changed = {'MW.SYSTEM', 'MW.SPLASH', 'MW.UI', 'MW.GP', 'MW.O6', 'MW.OD', 'SAMPLES/CF.GLOSS',
                'MOUSE.TUTORIAL/STARTUP', 'SPELLER/AUX.DICT.S'}
     for f in files:
         if f[0] in changed:
@@ -299,7 +354,7 @@ def main():
         v = ProDOS(d)
         if v.find(a.folder.strip('/')):
             die('/%s/%s already exists on that disk' % (v.volname, a.folder.strip('/')))
-        put_everything(v, a.folder.strip('/'), found, addon)
+        put_everything(v, a.folder.strip('/'), found, pieces)
         dst = os.path.join(out, os.path.basename(a.install_into))
         save(dst, v, hdr)
         print('  out/%-27s /%s/%s added' % (os.path.basename(dst), v.volname, a.folder.strip('/')))

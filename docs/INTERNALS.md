@@ -11,6 +11,7 @@
 | bytes 1-2 (the `JMP` at `$2000`) | `$2046` → `$3E1A`, the add-on |
 | title box text | `Version 2.6.8b` → `Version 3.0`; the blank box line after it → `Updated by 6502 Retro 2026` |
 | Expanded Desktop banner | `Version 2.6.8b` → `Version 3.0` |
+| `JSR $ADFA` at `$A13A` (draws the text title box) | → `JSR $FC58` (HOME), so the picture is the only title screen |
 | end of file | the add-on (`prebuilt/mwfix3.bin`, 963 bytes) appended from `$3E19` |
 
 The add-on is in two parts:
@@ -35,6 +36,23 @@ MouseWrite disconnects `/RAM` and uses all of auxiliary memory itself, so writin
 | `SAMPLES/CF.GLOSS` | `/MOUSEWRITE/ACCESSORY/FONTS/` → the installed path |
 | `MOUSE.TUTORIAL/STARTUP` | line 120: `verify STARTUP1` instead of `verify`/`prefix /MOUSEWRITE/MOUSE.TUTORIAL`. Line 210 is replaced by lines 210-211, which read the current prefix (`PREFIX` + `INPUT P$`), drop the last folder name, set the prefix there and run `-MW.SYSTEM`. |
 | `SPELLER/AUX.DICT.S` | sorted union of the 2.6.8b words and those on the 5.25" SPELLER disk |
+
+## Export ODT
+
+### Hooking the menu
+
+MouseWrite's menus are MouseText ToolKit tables in `MW.UI`. The File menu (at `$5859`) has 15 entries of 6 bytes (flags, mark, two key characters, text pointer); entry 9 was a separator (`40 00 13 00 00 00`). 3.0 turns it into `Export ODT`, whose text lives in the spare bytes left by shortening *Select Entire Document* to *Select All* (`$5A11`). The File dispatch (`CMP #$10` at `$0EC4`) jumps through a table at `$0FC4`, (item-1)*2; entry 9 was `$0000` and now points at `$6949`.
+
+`$6949` is the start of the overlay window (`$6949-$7948`). Every overlay begins with the same `$A9`-byte stub table, and its first stub loads `MW.O6` (Merge Paragraphs) through the loader at `$6162` and enters it at `$6CB6`. So in `MW.O6`, `BIT $03AA` at `$6CB6` becomes `JMP $6F40`, a short detour appended to the file (`src/o6patch.s`): if the menu result (`$4FCE` menu, `$4FCF` item) is File/9 it loads `MW.OD` and jumps to its entry at `$793B`; otherwise it does the `BIT $03AA` and goes on with Merge. `MW.O6` is padded to `$7941` so that the jump into the new overlay lies at the same address in both files.
+
+### The exporter (`src/mwod.s`, `MW.OD`, 4,088 bytes at `$6949`)
+
+* It reads the document straight from memory: rows from aux `$0900` up to the end pointer in aux zero page `$1A/$1B`, row width in `$0346`. Rows are copied to main memory with AUXMOVE (`$C311`). Bit 7 of `$03AA` says whether a document is open.
+* The window title pointer `$52D9` points at the full pathname (`$867E`) or at `Untitled` (`$5303`). The output name is that path with the last name cut to 11 characters, a trailing `.` dropped and `.ODT` added. If that would be the document itself, it stops.
+* The file is a stored (uncompressed) ZIP: `mimetype` first, `META-INF/manifest.xml`, then `content.xml`, which is streamed while it is converted, with a nibble-table CRC-32 and a running size. Afterwards the CRC and sizes are patched into the local header with `SET_MARK`, and the central directory and end record are written. All the fixed parts are generated from `tools/mw2odt.py` by `tools/make_odt_inc.py`; the long XML prologue (styles) is stored with a 24-phrase dictionary, which shrinks it from 2,506 bytes to 404.
+* Conversion rules (the same as `mw2odt.py`): a row containing `$0D` ends a paragraph; a full row without it is a soft wrap and becomes one space, or nothing after a hyphenated word. Style codes `$04-$0B` and colours `$13-$18` are toggles; when they change, the open spans are closed and reopened in a fixed order. `$0C` makes the next paragraph start on a new page; a row starting with `$1A` is a footnote; a `$1E` row (custom font command) is skipped up to its Return. Runs of spaces become `<text:s/>`.
+* Scratch memory: zero page `$06-$25` and `$3C-$43` (saved and restored), the alert buffer `$495C-$4BD9` (cleared by MouseWrite before every alert) for the output buffer, a row buffer and the path, and MouseWrite's own ProDOS buffer at `$8B00`. When it's done it shows the result with MouseWrite's alert routine (`$1340`) and reloads `MW.O6`, so the overlay window is as MouseWrite expects.
+* It converts about 1.7K of document per second at 1 MHz.
 
 ## The emulator
 

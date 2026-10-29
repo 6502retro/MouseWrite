@@ -4,6 +4,11 @@
 
 Based on MouseWrite 2.6.8b (Steve Cochard, Roger Wagner Publishing, 1987).
 
+* **File → Export ODT**: saves the open document (unsaved changes included) as an OpenDocument Text file next to it, for LibreOffice and OpenOffice. Paragraphs, page breaks, footnotes, all styles and colours are kept. The new overlay `MW.OD` is loaded through MouseWrite's own overlay loader, and memory is restored afterwards, so nothing else changes.
+* `tools/mw2odt.py` converts MouseWrite documents to `.odt` on a PC, producing the same file as the Apple II exporter.
+* The text title box shown after the title picture is removed; MouseWrite goes straight to the desktop.
+* *Edit → Select Entire Document* is renamed *Select All*.
+
 * Runs from any hard-disk folder. MW.SYSTEM re-points the document, desk accessory and speller paths to the folders next to it whenever the stored ones can't be found. Paths that work are kept.
 * New double hi-res title screen `MW.SPLASH` (*V: 3.0*, *Updated by 6502 Retro 2026*). Any key skips it, and it isn't shown again after returning from Basic.System.
 * *Version 3.0* on the loading screen (with *Updated by 6502 Retro 2026*), on the Expanded Desktop banner and in *About MouseWrite*.

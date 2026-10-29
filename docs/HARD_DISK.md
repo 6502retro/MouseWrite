@@ -33,6 +33,7 @@ Then open the folder and double-click **MW.SYSTEM** (the first icon). Quit with 
 * **Desk Accessories** are under the *MouseWrite* menu. Type `BYE` in *Basic.System* to get back to MouseWrite. The title screen is not shown again when you do.
 * **Custom fonts:** open the `SAMPLES/CF.GLOSS` glossary, press Control-G then `a`, `c` or `e` (Apple, C.Itoh, Epson). A font marker and the folder path are inserted; type the font name (e.g. `GOTHIC.IW`). `CF.GLOSS` is the one file that doesn't fix itself if the folder moves. Edit its three lines (it's a text file) or type the path yourself.
 * **Mouse tutorial:** double-click `MOUSE.TUTORIAL/STARTUP`. Choice 2 starts MouseWrite from the folder above it.
+* **Export ODT** (*File* menu) writes `NAME.ODT` next to the document. To get it onto a PC, copy it off the hard-disk image with CiderPress II, or transfer it with ADTPro. Save a new document once before exporting it.
 * **MouseWrite 1.5.7** (if you supplied its disk) is in `MW.V1.5.7`. It has no accessories or speller; open its sample files with the pathname option.
 
 ## Known limits
@@ -45,4 +46,5 @@ Then open the folder and double-click **MW.SYSTEM** (the first icon). Quit with 
 
 * **"The required Volume cannot be found"** after moving the folder: make sure `SAMPLES`, `ACCESSORY` and `SPELLER` are still inside the `MOUSEWRITE` folder, next to `MW.SYSTEM`. Then quit and start MouseWrite again.
 * **Launched by a program selector that doesn't set the prefix:** MouseWrite needs the ProDOS prefix to be its own folder, as it always has. Apple II DeskTop, Bitsy Bye and BASIC.SYSTEM's `-MW.SYSTEM` (after `PREFIX`) all do this.
+* **"Please save this document first" on Export ODT:** the document is still *Untitled*. Save it, then export.
 * **No title picture:** `MW.SPLASH` must be in the same folder as `MW.SYSTEM`. Without it MouseWrite simply starts without the picture.
